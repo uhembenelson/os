@@ -261,55 +261,96 @@ function isStandaloneBrowser() {
   return Boolean(media || (navigator as Navigator & { standalone?: boolean }).standalone);
 }
 
+type InstallWindow = Window & {
+  __nectarInstallPrompt?: InstallPromptEvent;
+  __nectarInstalled?: boolean;
+};
+
 function InstallBanner({ bottomOffset = 0 }: { bottomOffset?: number }) {
   const [visible, setVisible] = useState(false);
   const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | null>(null);
   const [isIos, setIsIos] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const dismiss = () => {
     setVisible(false);
     AsyncStorage.setItem(INSTALL_DISMISSED_KEY, "1").catch(() => undefined);
   };
   useEffect(() => {
     if (!isMobileBrowser() || isStandaloneBrowser()) return;
+    const win = window as InstallWindow;
     let cancelled = false;
+    if (win.__nectarInstallPrompt) setPromptEvent(win.__nectarInstallPrompt);
     AsyncStorage.getItem(INSTALL_DISMISSED_KEY).then((dismissed) => {
-      if (cancelled || dismissed) return;
+      if (cancelled || dismissed || win.__nectarInstalled) return;
       const ua = navigator.userAgent ?? "";
       setIsIos(/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1));
       setVisible(true);
     }).catch(() => undefined);
     const onPrompt = (event: Event) => {
       event.preventDefault();
+      win.__nectarInstallPrompt = event as InstallPromptEvent;
       if (cancelled) return;
       setPromptEvent(event as InstallPromptEvent);
       setVisible(true);
     };
-    const onInstalled = () => setVisible(false);
+    const onAvailable = () => {
+      if (!cancelled && win.__nectarInstallPrompt) setPromptEvent(win.__nectarInstallPrompt);
+    };
+    const onInstalled = () => {
+      win.__nectarInstalled = true;
+      if (!cancelled) setVisible(false);
+    };
     window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("nectar-install-available", onAvailable);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
       cancelled = true;
       window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("nectar-install-available", onAvailable);
       window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
   if (!visible) return null;
   const install = async () => {
-    if (!promptEvent) return;
+    if (!promptEvent) {
+      setShowHelp(true);
+      return;
+    }
     await promptEvent.prompt();
     const choice = await promptEvent.userChoice.catch(() => undefined);
-    if (choice?.outcome === "dismissed") dismiss();
-    else setVisible(false);
+    if (choice?.outcome === "dismissed") {
+      setPromptEvent(null);
+      setShowHelp(true);
+    } else {
+      setVisible(false);
+    }
   };
+  const helpSteps = isIos
+    ? ["Open this page in Safari", "Tap the Share icon (square with an arrow)", "Scroll, tap “Add to Home Screen”, then “Add”"]
+    : ["Open your browser menu (⋮)", "Tap “Install app” or “Add to Home screen”", "Confirm to put Nectar on your home screen"];
   return (
     <View style={[styles.installBanner, { bottom: bottomOffset }]}>
-      <View style={styles.installIcon}><Ionicons name="download-outline" size={20} color="#A84629" /></View>
-      <View style={styles.installTextWrap}>
-        <Text style={styles.installTitle}>Install Nectar</Text>
-        <Text style={styles.installCopy}>{isIos ? "Tap the Share icon, then “Add to Home Screen”." : "Add it to your home screen to use it like an app."}</Text>
+      <View style={styles.installRow}>
+        <Pressable style={styles.installMain} onPress={install}>
+          <View style={styles.installIcon}><Ionicons name={isIos ? "share-outline" : "download-outline"} size={20} color="#A84629" /></View>
+          <View style={styles.installTextWrap}>
+            <Text style={styles.installTitle}>Install Nectar</Text>
+            <Text style={styles.installCopy}>{promptEvent ? "Tap Install to add it to your home screen." : isIos ? "Tap the Share icon, then “Add to Home Screen”." : "Add it to your home screen to use it like an app."}</Text>
+          </View>
+          <View style={styles.installButton}><Text style={styles.installButtonText}>{promptEvent ? "Install" : "How?"}</Text></View>
+        </Pressable>
+        <Pressable onPress={dismiss} hitSlop={10} style={styles.installClose}><Ionicons name="close" size={18} color="#8C8177" /></Pressable>
       </View>
-      {!isIos && promptEvent && <Pressable style={styles.installButton} onPress={install}><Text style={styles.installButtonText}>Install</Text></Pressable>}
-      <Pressable onPress={dismiss} hitSlop={10} style={styles.installClose}><Ionicons name="close" size={18} color="#8C8177" /></Pressable>
+      {showHelp && (
+        <View style={styles.installHelp}>
+          {helpSteps.map((step, index) => (
+            <View key={step} style={styles.installHelpRow}>
+              <Text style={styles.installHelpIndex}>{index + 1}</Text>
+              <Text style={styles.installHelpText}>{step}</Text>
+            </View>
+          ))}
+        </View>
+      )}
     </View>
   );
 }
@@ -2557,7 +2598,9 @@ const styles = StyleSheet.create({
   signInScreen: { flex: 1, justifyContent: "center", backgroundColor: "#FFF9F2", paddingHorizontal: 25 },
   signInContent: { width: "100%", maxWidth: 430, alignSelf: "center" },
   signInMark: { alignItems: "flex-start", marginBottom: 22 },
-  installBanner: { position: "absolute", left: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 18, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: "#F0E3D8", shadowColor: "#4B2518", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  installBanner: { position: "absolute", left: 14, right: 14, backgroundColor: "#FFFFFF", borderRadius: 18, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: "#F0E3D8", shadowColor: "#4B2518", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  installRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  installMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
   installIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#FBEDE6", alignItems: "center", justifyContent: "center" },
   installTextWrap: { flex: 1 },
   installTitle: { color: "#33251D", fontSize: 15, fontWeight: "800" },
@@ -2565,6 +2608,10 @@ const styles = StyleSheet.create({
   installButton: { backgroundColor: "#A84629", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
   installButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
   installClose: { padding: 2 },
+  installHelp: { marginTop: 12, gap: 8, borderTopWidth: 1, borderTopColor: "#F3E8DE", paddingTop: 12 },
+  installHelpRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  installHelpIndex: { width: 20, height: 20, borderRadius: 10, backgroundColor: "#FBEDE6", color: "#A84629", fontSize: 11, fontWeight: "800", textAlign: "center", lineHeight: 20, overflow: "hidden" },
+  installHelpText: { flex: 1, color: "#5F564E", fontSize: 13, lineHeight: 18 },
   headerBrandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   signInTitle: { color: "#33251D", fontSize: 36, lineHeight: 43, fontWeight: "900", letterSpacing: -1, marginTop: 11 },
   signInCopy: { color: "#817870", fontSize: 16, lineHeight: 23, marginTop: 11, marginBottom: 25 },

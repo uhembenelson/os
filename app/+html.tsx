@@ -19,6 +19,12 @@ export default function Root({ children }: PropsWithChildren) {
         <link rel="icon" href="/icons/icon-192.png" />
         <ScrollViewStyleReset />
         <style dangerouslySetInnerHTML={{ __html: "body{background:#FFF9F2;}" }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__nectarInstallPrompt=e;window.dispatchEvent(new Event('nectar-install-available'));});window.addEventListener('appinstalled',function(){window.__nectarInstalled=true;});",
+          }}
+        />
       </head>
       <body>{children}</body>
     </html>
