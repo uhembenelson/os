@@ -65,6 +65,23 @@ describe("resetAllData", () => {
     const counts = await tableCounts(t);
     expect(counts.menuItems).toBe(0);
     expect(counts.ingredients).toBe(0);
+
+    const status = await ownerT.query(api.menu.seedStatus, {});
+    expect(status).toEqual({ defaultsSeeded: true, hasMenu: false });
+  });
+
+  test("marks defaults as seeded so the app does not auto-restore the starter menu", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    await seedBusinessData(t);
+
+    expect(await ownerT.query(api.menu.seedStatus, {})).toEqual({ defaultsSeeded: false, hasMenu: true });
+
+    await ownerT.mutation(api.admin.resetAllData, { confirm: "RESET", reseed: false });
+
+    const status = await ownerT.query(api.menu.seedStatus, {});
+    expect(status.defaultsSeeded).toBe(true);
+    expect(status.hasMenu).toBe(false);
   });
 
   test("requires the confirmation word", async () => {

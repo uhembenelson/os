@@ -141,7 +141,27 @@ export const seedDefaults = mutation({
   },
 });
 
+export const seedStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    const marker = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", "defaults")).unique();
+    const item = await ctx.db.query("menuItems").withIndex("by_active", (q) => q.eq("active", true)).first();
+    return { defaultsSeeded: marker?.defaultsSeeded ?? false, hasMenu: Boolean(item) };
+  },
+});
+
+export async function markDefaultsSeeded(ctx: MutationCtx) {
+  const existing = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", "defaults")).unique();
+  if (existing) {
+    if (!existing.defaultsSeeded) await ctx.db.patch(existing._id, { defaultsSeeded: true });
+    return;
+  }
+  await ctx.db.insert("appSettings", { key: "defaults", defaultsSeeded: true });
+}
+
 export async function insertDefaultData(ctx: MutationCtx) {
+  await markDefaultsSeeded(ctx);
   const existingItem = await ctx.db.query("menuItems").withIndex("by_active", (q) => q.eq("active", true)).first();
   if (existingItem) return { seeded: false };
 

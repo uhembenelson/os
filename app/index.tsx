@@ -69,7 +69,7 @@ export default function Index() {
   const { isLoading, isAuthenticated } = useConvexAuth();
   const { signOut } = useAuthActions();
   const currentStaff = useQuery(api.team.current, isAuthenticated ? {} : "skip");
-  const liveMenu = useQuery(api.menu.list, isAuthenticated ? {} : "skip");
+  const seedStatus = useQuery(api.menu.seedStatus, isAuthenticated ? {} : "skip");
   const seedDefaults = useMutation(api.menu.seedDefaults);
   const insets = useSafeAreaInsets();
   const navigateToTab = (nextTab: TabName) => {
@@ -79,10 +79,10 @@ export default function Index() {
   };
 
   useEffect(() => {
-    if (!isAuthenticated || role !== "owner" || liveMenu?.length !== 0 || seedRequested) return;
+    if (!isAuthenticated || role !== "owner" || !seedStatus || seedStatus.defaultsSeeded || seedRequested) return;
     setSeedRequested(true);
     seedDefaults({}).catch(() => setSeedRequested(false));
-  }, [isAuthenticated, liveMenu, role, seedDefaults, seedRequested]);
+  }, [isAuthenticated, seedStatus, role, seedDefaults, seedRequested]);
 
   useEffect(() => {
     AsyncStorage.getItem(DRAFT_KEY)
@@ -1524,7 +1524,7 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
   const shiftReport = useQuery(api.shifts.report, shiftReportId ? { shiftId: shiftReportId } : "skip");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetConfirm, setResetConfirm] = useState("");
-  const [resetReseed, setResetReseed] = useState(true);
+  const [resetReseed, setResetReseed] = useState(false);
   const [resetSaving, setResetSaving] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetNotice, setResetNotice] = useState<string | null>(null);

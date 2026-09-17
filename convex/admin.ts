@@ -4,7 +4,7 @@ import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { requireRole } from "./authz";
-import { insertDefaultData } from "./menu";
+import { insertDefaultData, markDefaultsSeeded } from "./menu";
 
 const CONFIRMATION = "RESET";
 const BATCH_PER_TABLE = 400;
@@ -70,6 +70,7 @@ export const resetAllData = mutation({
     await requireRole(ctx, "owner");
     if (args.confirm.trim().toUpperCase() !== CONFIRMATION) throw new Error("Type RESET to confirm.");
     const reseed = args.reseed ?? true;
+    await markDefaultsSeeded(ctx);
 
     const deleted = await clearBatch(ctx, MAX_TOTAL);
     const removedStaff = await removeNonOwnerStaff(ctx, STAFF_BATCH);
@@ -92,5 +93,6 @@ export const finishReset = internalMutation({
       return;
     }
     if (args.reseed) await insertDefaultData(ctx);
+    else await markDefaultsSeeded(ctx);
   },
 });
