@@ -200,7 +200,7 @@ function SignInScreen() {
   return (
     <SafeAreaView style={styles.signInScreen}>
       <KeyboardAvoidingView style={styles.signInContent} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <TouchableWithoutFeedback onPress={dismissKeyboardOnNative}>
           <View>
         <View style={styles.signInMark}><BrandMark size={34} /></View>
         <Text style={styles.signInTitle}>{firstRun ? "Set up your restaurant." : recoverMode ? "Recover owner PIN" : "Welcome back."}</Text>
@@ -244,6 +244,10 @@ type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
+
+function dismissKeyboardOnNative() {
+  if (Platform.OS !== "web") Keyboard.dismiss();
+}
 
 function isMobileBrowser() {
   if (Platform.OS !== "web" || typeof navigator === "undefined") return false;
