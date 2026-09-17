@@ -18,6 +18,8 @@
       }
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./assets/logo.png"
     },
     "plugins": [
