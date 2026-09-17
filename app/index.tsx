@@ -40,17 +40,6 @@ const tabs: { label: TabName; icon: IconName; activeIcon: IconName }[] = [
 
 type MenuItem = { key: string; name: string; description: string; priceKobo: number; category: string; icon: IconName; color: string; soldOut: boolean; menuItemId?: Id<"menuItems"> };
 
-const fallbackMenuItems: MenuItem[] = [
-  { key: "jollof-chicken", name: "Jollof rice & chicken", description: "Smoky jollof, grilled chicken", priceKobo: 450000, category: "Mains", icon: "restaurant-outline" as IconName, color: "#F4E1D5", soldOut: false },
-  { key: "suya-platter", name: "Suya platter", description: "Spiced beef, onions, yaji", priceKobo: 600000, category: "Mains", icon: "flame-outline" as IconName, color: "#F3D9C3", soldOut: false },
-  { key: "pepper-soup", name: "Goat pepper soup", description: "Slow-cooked, aromatic broth", priceKobo: 520000, category: "Mains", icon: "water-outline" as IconName, color: "#E4E7D3", soldOut: false },
-  { key: "fried-plantain", name: "Fried plantain", description: "Golden, sweet plantain", priceKobo: 180000, category: "Sides", icon: "leaf-outline" as IconName, color: "#F5E7B8", soldOut: false },
-  { key: "coleslaw", name: "Fresh coleslaw", description: "Cabbage, carrot, light dressing", priceKobo: 150000, category: "Sides", icon: "nutrition-outline" as IconName, color: "#DDEAD6", soldOut: false },
-  { key: "zobo", name: "Zobo cooler", description: "Chilled hibiscus and spice", priceKobo: 120000, category: "Drinks", icon: "wine-outline" as IconName, color: "#EDD7E1", soldOut: false },
-  { key: "chapman", name: "Chapman", description: "Citrus, bitters, cucumber", priceKobo: 200000, category: "Drinks", icon: "cafe-outline" as IconName, color: "#F2DCCB", soldOut: false },
-  { key: "chin-chin", name: "Chin chin bowl", description: "Crunchy house-made bites", priceKobo: 150000, category: "Snacks", icon: "fast-food-outline" as IconName, color: "#EFE3B9", soldOut: false },
-];
-
 type Cart = Record<string, { item: MenuItem; quantity: number }>;
 type PaymentMethod = "cash" | "card" | "transfer";
 type PendingPayment = { orderId: Id<"orders">; number: string; totalKobo: number; itemCount: number };
@@ -566,7 +555,7 @@ function SellScreen({
   const [refunding, setRefunding] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
 
-  const menuItems = liveMenu?.length ? liveMenu.map(toMenuItem) : fallbackMenuItems;
+  const menuItems = (liveMenu ?? []).map(toMenuItem);
   const categories = ["All", ...Array.from(new Set(menuItems.map((item) => item.category)))];
   const visibleItems = menuItems.filter((item) => {
     const inCategory = category === "All" || item.category === category;
@@ -790,10 +779,12 @@ function SellScreen({
           })}
         </ScrollView>
 
-        <View style={styles.menuHeading}>
-          <Text style={styles.menuHeadingText}>{category === "All" ? "Popular today" : category}</Text>
-          <Text style={styles.menuCount}>{visibleItems.length} items</Text>
-        </View>
+        {menuItems.length > 0 && (
+          <View style={styles.menuHeading}>
+            <Text style={styles.menuHeadingText}>{category === "All" ? "Popular today" : category}</Text>
+            <Text style={styles.menuCount}>{visibleItems.length} items</Text>
+          </View>
+        )}
 
         <View style={styles.menuList}>
           {visibleItems.map((item) => {
@@ -820,9 +811,9 @@ function SellScreen({
 
         {visibleItems.length === 0 && (
           <View style={styles.noResults}>
-            <Ionicons name="search-outline" size={30} color="#A3A79F" />
-            <Text style={styles.noResultsTitle}>No menu items found</Text>
-            <Text style={styles.noResultsCopy}>Try another search or category.</Text>
+            <Ionicons name={menuItems.length === 0 ? "restaurant-outline" : "search-outline"} size={30} color="#A3A79F" />
+            <Text style={styles.noResultsTitle}>{menuItems.length === 0 ? "No menu items yet" : "No menu items found"}</Text>
+            <Text style={styles.noResultsCopy}>{menuItems.length === 0 ? "Add items from More → Menu to start selling." : "Try another search or category."}</Text>
           </View>
         )}
       </ScrollView>
