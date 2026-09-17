@@ -56,6 +56,7 @@ type PaymentMethod = "cash" | "card" | "transfer";
 type PendingPayment = { orderId: Id<"orders">; number: string; totalKobo: number; itemCount: number };
 
 const DRAFT_KEY = "@nectar/pos-draft";
+const INSTALL_DISMISSED_KEY = "@nectar/install-dismissed";
 export default function Index() {
   const [tab, setTab] = useState<TabName>("Home");
   const [cart, setCart] = useState<Cart>({});
@@ -103,6 +104,11 @@ export default function Index() {
   }, [cart, deliveryFee, draftReady, orderType, packagingFee]);
 
   useEffect(() => {
+    if (Platform.OS !== "web" || typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
     if (currentStaff?.role === "owner" || currentStaff?.role === "manager" || currentStaff?.role === "cashier" || currentStaff?.role === "kitchen") setRole(currentStaff.role);
   }, [currentStaff?.role]);
 
@@ -136,6 +142,7 @@ export default function Index() {
         <MoreScreen bottomInset={insets.bottom} role={role} onSignOut={() => signOut()} />
       )}
       <TabBar tab={tab} onChange={navigateToTab} bottomInset={insets.bottom} role={role} />
+      <InstallBanner bottomOffset={insets.bottom + 92} />
     </SafeAreaView>
   );
 }
@@ -145,6 +152,7 @@ function SignInScreen() {
   const setupStatus = useQuery(api.team.setupStatus);
   const bootstrapOwner = useMutation(api.team.bootstrapOwner);
   const recoverOwnerPin = useMutation(api.team.recoverOwnerPin);
+  const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
@@ -219,6 +227,7 @@ function SignInScreen() {
           </View>
         </TouchableWithoutFeedback>
       </KeyboardAvoidingView>
+      <InstallBanner bottomOffset={insets.bottom + 16} />
     </SafeAreaView>
   );
 }
@@ -229,6 +238,76 @@ function normalizePhoneForLogin(value: string) {
   if (compact.startsWith("00")) return `+${compact.slice(2)}`;
   if (compact.startsWith("0")) return `+234${compact.slice(1)}`;
   return `+${compact}`;
+}
+
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+};
+
+function isMobileBrowser() {
+  if (Platform.OS !== "web" || typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent ?? "";
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+function isStandaloneBrowser() {
+  if (Platform.OS !== "web" || typeof window === "undefined") return false;
+  const media = typeof window.matchMedia === "function" && window.matchMedia("(display-mode: standalone)").matches;
+  return Boolean(media || (navigator as Navigator & { standalone?: boolean }).standalone);
+}
+
+function InstallBanner({ bottomOffset = 0 }: { bottomOffset?: number }) {
+  const [visible, setVisible] = useState(false);
+  const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | null>(null);
+  const [isIos, setIsIos] = useState(false);
+  const dismiss = () => {
+    setVisible(false);
+    AsyncStorage.setItem(INSTALL_DISMISSED_KEY, "1").catch(() => undefined);
+  };
+  useEffect(() => {
+    if (!isMobileBrowser() || isStandaloneBrowser()) return;
+    let cancelled = false;
+    AsyncStorage.getItem(INSTALL_DISMISSED_KEY).then((dismissed) => {
+      if (cancelled || dismissed) return;
+      const ua = navigator.userAgent ?? "";
+      setIsIos(/iPhone|iPad|iPod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1));
+      setVisible(true);
+    }).catch(() => undefined);
+    const onPrompt = (event: Event) => {
+      event.preventDefault();
+      if (cancelled) return;
+      setPromptEvent(event as InstallPromptEvent);
+      setVisible(true);
+    };
+    const onInstalled = () => setVisible(false);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+  if (!visible) return null;
+  const install = async () => {
+    if (!promptEvent) return;
+    await promptEvent.prompt();
+    const choice = await promptEvent.userChoice.catch(() => undefined);
+    if (choice?.outcome === "dismissed") dismiss();
+    else setVisible(false);
+  };
+  return (
+    <View style={[styles.installBanner, { bottom: bottomOffset }]}>
+      <View style={styles.installIcon}><Ionicons name="download-outline" size={20} color="#A84629" /></View>
+      <View style={styles.installTextWrap}>
+        <Text style={styles.installTitle}>Install Nectar</Text>
+        <Text style={styles.installCopy}>{isIos ? "Tap the Share icon, then “Add to Home Screen”." : "Add it to your home screen to use it like an app."}</Text>
+      </View>
+      {!isIos && promptEvent && <Pressable style={styles.installButton} onPress={install}><Text style={styles.installButtonText}>Install</Text></Pressable>}
+      <Pressable onPress={dismiss} hitSlop={10} style={styles.installClose}><Ionicons name="close" size={18} color="#8C8177" /></Pressable>
+    </View>
+  );
 }
 
 function HomeScreen({ onNavigate, role, staffName }: { onNavigate: (tab: TabName) => void; role: Role; staffName: string }) {
@@ -2474,6 +2553,14 @@ const styles = StyleSheet.create({
   signInScreen: { flex: 1, justifyContent: "center", backgroundColor: "#FFF9F2", paddingHorizontal: 25 },
   signInContent: { width: "100%", maxWidth: 430, alignSelf: "center" },
   signInMark: { alignItems: "flex-start", marginBottom: 22 },
+  installBanner: { position: "absolute", left: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#FFFFFF", borderRadius: 18, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: "#F0E3D8", shadowColor: "#4B2518", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  installIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#FBEDE6", alignItems: "center", justifyContent: "center" },
+  installTextWrap: { flex: 1 },
+  installTitle: { color: "#33251D", fontSize: 15, fontWeight: "800" },
+  installCopy: { color: "#8C8177", fontSize: 12, lineHeight: 16, marginTop: 2 },
+  installButton: { backgroundColor: "#A84629", borderRadius: 999, paddingHorizontal: 14, paddingVertical: 8 },
+  installButtonText: { color: "#FFFFFF", fontSize: 13, fontWeight: "800" },
+  installClose: { padding: 2 },
   headerBrandRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   signInTitle: { color: "#33251D", fontSize: 36, lineHeight: 43, fontWeight: "900", letterSpacing: -1, marginTop: 11 },
   signInCopy: { color: "#817870", fontSize: 16, lineHeight: 23, marginTop: 11, marginBottom: 25 },
