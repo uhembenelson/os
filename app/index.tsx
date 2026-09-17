@@ -152,7 +152,6 @@ function SignInScreen() {
   const setupStatus = useQuery(api.team.setupStatus);
   const bootstrapOwner = useMutation(api.team.bootstrapOwner);
   const recoverOwnerPin = useMutation(api.team.recoverOwnerPin);
-  const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
@@ -200,6 +199,7 @@ function SignInScreen() {
   return (
     <SafeAreaView style={styles.signInScreen}>
       <KeyboardAvoidingView style={styles.signInContent} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView contentContainerStyle={styles.signInScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <TouchableWithoutFeedback onPress={dismissKeyboardOnNative}>
           <View>
         <View style={styles.signInMark}><BrandMark size={34} /></View>
@@ -224,10 +224,11 @@ function SignInScreen() {
         {!firstRun && (recoverMode
           ? <Pressable onPress={toSignIn} style={styles.signInForgot}><Ionicons name="arrow-back" size={16} color="#8C8177" /><Text style={styles.signInForgotText}>Back to sign in</Text></Pressable>
           : <Pressable onPress={() => { setRecoverMode(true); setError(null); }} style={styles.signInForgot}><Ionicons name="lock-open-outline" size={16} color="#8C8177" /><Text style={styles.signInForgotText}>Owner forgot PIN? Recover</Text></Pressable>)}
+          <InstallBanner inline />
           </View>
         </TouchableWithoutFeedback>
+        </ScrollView>
       </KeyboardAvoidingView>
-      <InstallBanner bottomOffset={insets.bottom + 16} />
     </SafeAreaView>
   );
 }
@@ -266,7 +267,7 @@ type InstallWindow = Window & {
   __nectarInstalled?: boolean;
 };
 
-function InstallBanner({ bottomOffset = 0 }: { bottomOffset?: number }) {
+function InstallBanner({ bottomOffset = 0, inline = false }: { bottomOffset?: number; inline?: boolean }) {
   const [visible, setVisible] = useState(false);
   const [promptEvent, setPromptEvent] = useState<InstallPromptEvent | null>(null);
   const [isIos, setIsIos] = useState(false);
@@ -329,7 +330,7 @@ function InstallBanner({ bottomOffset = 0 }: { bottomOffset?: number }) {
     ? ["Open this page in Safari", "Tap the Share icon (square with an arrow)", "Scroll, tap “Add to Home Screen”, then “Add”"]
     : ["Open your browser menu (⋮)", "Tap “Install app” or “Add to Home screen”", "Confirm to put Nectar on your home screen"];
   return (
-    <View style={[styles.installBanner, { bottom: bottomOffset }]}>
+    <View style={[styles.installBanner, inline ? styles.installBannerInline : { bottom: bottomOffset }]}>
       <View style={styles.installRow}>
         <Pressable style={styles.installMain} onPress={install}>
           <View style={styles.installIcon}><Ionicons name={isIos ? "share-outline" : "download-outline"} size={20} color="#A84629" /></View>
@@ -2596,9 +2597,11 @@ const styles = StyleSheet.create({
   tabBar: { position: "absolute", left: 0, right: 0, bottom: 0, minHeight: 74, flexDirection: "row", alignItems: "flex-start", justifyContent: "space-around", backgroundColor: "#FFFFFF", paddingTop: 9, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: "#DADBD5", shadowColor: "#1A211B", shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: -5 }, elevation: 12 },
   authLoading: { flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FFF9F2" },
   signInScreen: { flex: 1, justifyContent: "center", backgroundColor: "#FFF9F2", paddingHorizontal: 25 },
-  signInContent: { width: "100%", maxWidth: 430, alignSelf: "center" },
+  signInContent: { flex: 1, width: "100%", maxWidth: 430, alignSelf: "center" },
+  signInScroll: { flexGrow: 1, justifyContent: "center", paddingVertical: 24 },
   signInMark: { alignItems: "flex-start", marginBottom: 22 },
   installBanner: { position: "absolute", left: 14, right: 14, backgroundColor: "#FFFFFF", borderRadius: 18, paddingVertical: 12, paddingHorizontal: 14, borderWidth: 1, borderColor: "#F0E3D8", shadowColor: "#4B2518", shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 6 },
+  installBannerInline: { position: "relative", left: 0, right: 0, marginTop: 20 },
   installRow: { flexDirection: "row", alignItems: "center", gap: 10 },
   installMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12 },
   installIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: "#FBEDE6", alignItems: "center", justifyContent: "center" },
