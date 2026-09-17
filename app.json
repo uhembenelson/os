@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Nectar",
+    "slug": "nectar-restaurant-os",
+    "scheme": "nectar",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "./assets/logo.png",
+    "ios": {
+      "bundleIdentifier": "com.nectar.restaurantos"
+    },
+    "android": {
+      "package": "com.nectar.restaurantos",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/logo.png",
+        "backgroundColor": "#FFF9F2"
+      }
+    },
+    "web": {
+      "favicon": "./assets/logo.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/logo.png",
+          "imageWidth": 110,
+          "resizeMode": "contain",
+          "backgroundColor": "#FFF9F2"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
