@@ -1,10 +1,8 @@
 import { internalMutation, mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
-import type { TableNames } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { requireRole } from "./authz";
-import { insertDefaultData, markDefaultsSeeded } from "./menu";
 
 const CONFIRMATION = "RESET";
 const BATCH_PER_TABLE = 400;
@@ -64,35 +62,28 @@ async function hasRemaining(ctx: MutationCtx) {
 export const resetAllData = mutation({
   args: {
     confirm: v.string(),
-    reseed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, "owner");
     if (args.confirm.trim().toUpperCase() !== CONFIRMATION) throw new Error("Type RESET to confirm.");
-    const reseed = args.reseed ?? true;
-    await markDefaultsSeeded(ctx);
 
     const deleted = await clearBatch(ctx, MAX_TOTAL);
     const removedStaff = await removeNonOwnerStaff(ctx, STAFF_BATCH);
     if (await hasRemaining(ctx)) {
-      await ctx.scheduler.runAfter(0, internal.admin.finishReset, { reseed });
-      return { finished: false, deleted, removedStaff, seeded: false };
+      await ctx.scheduler.runAfter(0, internal.admin.finishReset, {});
+      return { finished: false, deleted, removedStaff };
     }
-    const seeded = reseed ? (await insertDefaultData(ctx)).seeded : false;
-    return { finished: true, deleted, removedStaff, seeded };
+    return { finished: true, deleted, removedStaff };
   },
 });
 
 export const finishReset = internalMutation({
-  args: { reseed: v.boolean() },
-  handler: async (ctx, args) => {
+  args: {},
+  handler: async (ctx) => {
     await clearBatch(ctx, MAX_TOTAL);
     await removeNonOwnerStaff(ctx, STAFF_BATCH);
     if (await hasRemaining(ctx)) {
-      await ctx.scheduler.runAfter(0, internal.admin.finishReset, { reseed: args.reseed });
-      return;
+      await ctx.scheduler.runAfter(0, internal.admin.finishReset, {});
     }
-    if (args.reseed) await insertDefaultData(ctx);
-    else await markDefaultsSeeded(ctx);
   },
 });

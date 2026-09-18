@@ -54,24 +54,15 @@ export default function Index() {
   const [packagingFee, setPackagingFee] = useState("");
   const [draftReady, setDraftReady] = useState(false);
   const [role, setRole] = useState<Role>("cashier");
-  const [seedRequested, setSeedRequested] = useState(false);
   const { isLoading, isAuthenticated } = useConvexAuth();
   const { signOut } = useAuthActions();
   const currentStaff = useQuery(api.team.current, isAuthenticated ? {} : "skip");
-  const seedStatus = useQuery(api.menu.seedStatus, isAuthenticated ? {} : "skip");
-  const seedDefaults = useMutation(api.menu.seedDefaults);
   const insets = useSafeAreaInsets();
   const navigateToTab = (nextTab: TabName) => {
     if (role === "kitchen" && !["Home", "Kitchen", "More"].includes(nextTab)) return;
     if (role === "cashier" && nextTab === "Stock") return;
     setTab(nextTab);
   };
-
-  useEffect(() => {
-    if (!isAuthenticated || role !== "owner" || !seedStatus || seedStatus.defaultsSeeded || seedRequested) return;
-    setSeedRequested(true);
-    seedDefaults({}).catch(() => setSeedRequested(false));
-  }, [isAuthenticated, seedStatus, role, seedDefaults, seedRequested]);
 
   useEffect(() => {
     AsyncStorage.getItem(DRAFT_KEY)
@@ -1515,7 +1506,6 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
   const shiftReport = useQuery(api.shifts.report, shiftReportId ? { shiftId: shiftReportId } : "skip");
   const [resetOpen, setResetOpen] = useState(false);
   const [resetConfirm, setResetConfirm] = useState("");
-  const [resetReseed, setResetReseed] = useState(false);
   const [resetSaving, setResetSaving] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetNotice, setResetNotice] = useState<string | null>(null);
@@ -1672,9 +1662,9 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
   const runReset = async () => {
     setResetSaving(true); setResetError(null); setResetNotice(null);
     try {
-      const result = await resetAllData({ confirm: resetConfirm, reseed: resetReseed });
+      const result = await resetAllData({ confirm: resetConfirm });
       if (result.finished) {
-        setResetOpen(false); setResetConfirm(""); setResetReseed(true);
+        setResetOpen(false); setResetConfirm("");
       } else {
         setResetNotice("Almost done — the remaining records are clearing in the background.");
       }
@@ -1719,7 +1709,7 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
           <Pressable style={styles.manageMenuButton} onPress={() => { setStaffName(""); setStaffPhone(""); setStaffPin(""); setStaffRole("cashier"); setError(null); setStaffModalOpen(true); }}><View style={styles.manageMenuIcon}><Ionicons name="person-add-outline" size={23} color="#A34A30" /></View><View style={styles.manageMenuMain}><Text style={styles.moneyActionTitle}>Create staff account</Text><Text style={styles.moneyActionCopy}>Set a phone number, role and six-digit PIN to hand over</Text></View><Ionicons name="chevron-forward" size={19} color="#B0AAA4" /></Pressable>
           {staffList?.filter((staff) => staff.role !== "owner").map((staff) => <View key={staff._id} style={styles.moneyListRow}><View style={styles.moneyListIcon}><Ionicons name="person-outline" size={18} color="#A34A30" /></View><View style={styles.moneyListMain}><Text style={styles.moneyListTitle}>{staff.name ?? "Staff"}</Text><Text style={styles.moneyListMeta}>{staff.phone} · {staff.role}</Text></View><Pressable onPress={() => { setPinMode("reset"); setPinTarget(staff); setCurrentPin(""); setNewPin(""); setError(null); setPinModalOpen(true); }}><Text style={styles.roleChangeText}>PIN</Text></Pressable><Pressable onPress={() => setStaffActive({ userId: staff._id, active: staff.active === false })}><Text style={styles.roleChangeText}>{staff.active === false ? "Enable" : "Disable"}</Text></Pressable></View>)}
           <View style={styles.moreSectionHeader}><Text style={styles.moreSectionTitle}>Danger zone</Text><Text style={styles.moreSectionHint}>Cannot be undone</Text></View>
-          <Pressable style={styles.dangerButton} onPress={() => { setResetConfirm(""); setResetReseed(true); setResetError(null); setResetNotice(null); setResetOpen(true); }}><View style={styles.dangerIcon}><Ionicons name="warning-outline" size={22} color="#A34A30" /></View><View style={styles.manageMenuMain}><Text style={styles.dangerTitle}>Reset all data</Text><Text style={styles.dangerCopy}>Erase orders, sales, stock and staff to start over</Text></View><Ionicons name="chevron-forward" size={19} color="#C99A8A" /></Pressable>
+          <Pressable style={styles.dangerButton} onPress={() => { setResetConfirm(""); setResetError(null); setResetNotice(null); setResetOpen(true); }}><View style={styles.dangerIcon}><Ionicons name="warning-outline" size={22} color="#A34A30" /></View><View style={styles.manageMenuMain}><Text style={styles.dangerTitle}>Reset all data</Text><Text style={styles.dangerCopy}>Erase orders, sales, stock and staff to start over</Text></View><Ionicons name="chevron-forward" size={19} color="#C99A8A" /></Pressable>
         </>}
         {moreSection === "money" && <>
         {canSeeMoney && <>
@@ -1840,10 +1830,6 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
                 <Text style={styles.resetWarningText}>Erases every order, payment, refund, shift, expense, purchase, stock movement, ingredient, recipe and menu item. Staff accounts other than owners are removed too.</Text>
               </View>
               <Text style={styles.resetKeepText}>Your owner sign-in stays active so you can start over.</Text>
-              <Pressable style={styles.availabilityToggle} onPress={() => setResetReseed(!resetReseed)}>
-                <Ionicons name={resetReseed ? "checkbox" : "square-outline"} size={22} color={resetReseed ? "#557451" : "#A0A49D"} />
-                <Text style={styles.availabilityText}>Load the starter menu and ingredients again</Text>
-              </Pressable>
               <Text style={styles.receiveLabel}>Type RESET to confirm</Text>
               <View style={styles.reasonInputWrap}><TextInput value={resetConfirm} onChangeText={(value) => { setResetConfirm(value); setResetError(null); setResetNotice(null); }} placeholder="RESET" placeholderTextColor="#A0A49D" style={styles.reasonInput} autoCapitalize="characters" /></View>
               {resetNotice && <Text style={styles.resetKeepText}>{resetNotice}</Text>}

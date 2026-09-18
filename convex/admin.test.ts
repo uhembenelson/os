@@ -29,15 +29,14 @@ async function tableCounts(t: ReturnType<typeof newT>) {
 }
 
 describe("resetAllData", () => {
-  test("clears business data, keeps the owner, removes other staff, and reseeds the starter menu", async () => {
+  test("clears business data, keeps the owner, and removes other staff", async () => {
     const t = newT();
     const ownerT = await asOwner(t);
     await createStaffAsOwner(ownerT, t, "Manny", "+2348099999999", "111111", "manager");
     await seedBusinessData(t);
 
-    const result = await ownerT.mutation(api.admin.resetAllData, { confirm: "RESET", reseed: true });
+    const result = await ownerT.mutation(api.admin.resetAllData, { confirm: "RESET" });
     expect(result.removedStaff).toBe(1);
-    expect(result.seeded).toBe(true);
 
     const counts = await tableCounts(t);
     expect(counts.users).toBe(1);
@@ -46,42 +45,12 @@ describe("resetAllData", () => {
     expect(counts.shifts).toBe(0);
     expect(counts.expenses).toBe(0);
     expect(counts.purchases).toBe(0);
-    expect(counts.menuItems).toBe(8);
-    expect(counts.menuCategories).toBe(4);
-    expect(counts.ingredients).toBe(10);
-
-    const menu = await ownerT.query(api.menu.list, {});
-    expect(menu.length).toBe(8);
-  });
-
-  test("leaves an empty menu when reseed is off", async () => {
-    const t = newT();
-    const ownerT = await asOwner(t);
-    await seedBusinessData(t);
-
-    const result = await ownerT.mutation(api.admin.resetAllData, { confirm: "reset", reseed: false });
-    expect(result.seeded).toBe(false);
-
-    const counts = await tableCounts(t);
     expect(counts.menuItems).toBe(0);
+    expect(counts.menuCategories).toBe(0);
     expect(counts.ingredients).toBe(0);
 
-    const status = await ownerT.query(api.menu.seedStatus, {});
-    expect(status).toEqual({ defaultsSeeded: true, hasMenu: false });
-  });
-
-  test("marks defaults as seeded so the app does not auto-restore the starter menu", async () => {
-    const t = newT();
-    const ownerT = await asOwner(t);
-    await seedBusinessData(t);
-
-    expect(await ownerT.query(api.menu.seedStatus, {})).toEqual({ defaultsSeeded: false, hasMenu: true });
-
-    await ownerT.mutation(api.admin.resetAllData, { confirm: "RESET", reseed: false });
-
-    const status = await ownerT.query(api.menu.seedStatus, {});
-    expect(status.defaultsSeeded).toBe(true);
-    expect(status.hasMenu).toBe(false);
+    const menu = await ownerT.query(api.menu.list, {});
+    expect(menu.length).toBe(0);
   });
 
   test("requires the confirmation word", async () => {

@@ -138,8 +138,4 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_createdAt", ["createdAt"]).index("by_shiftId", ["shiftId"]),
   purchaseItems: defineTable({ purchaseId: v.id("purchases"), ingredientId: v.id("ingredients"), quantity: v.number(), unitCostKobo: v.number(), totalKobo: v.number() }).index("by_purchaseId", ["purchaseId"]).index("by_ingredientId", ["ingredientId"]),
-  appSettings: defineTable({
-    key: v.string(),
-    defaultsSeeded: v.boolean(),
-  }).index("by_key", ["key"]),
 });
