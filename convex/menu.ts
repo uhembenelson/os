@@ -83,6 +83,31 @@ export const createItem = mutation({
   },
 });
 
+export const createItems = mutation({
+  args: {
+    category: v.string(),
+    items: v.array(v.object({ name: v.string(), description: v.string(), priceKobo: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, "owner");
+    if (args.items.length === 0) throw new Error("Add at least one menu item.");
+    const categories = await ctx.db.query("menuCategories").withIndex("by_slug").collect();
+    if (!categories.some((row) => row.name === args.category && row.active)) throw new Error("Choose an active menu category.");
+    const existing = await ctx.db.query("menuItems").withIndex("by_category", (q) => q.eq("category", args.category)).take(500);
+    let sortOrder = existing.length;
+    let count = 0;
+    for (const item of args.items) {
+      const name = item.name.trim();
+      if (!name) throw new Error("Menu item name is required.");
+      if (!Number.isFinite(item.priceKobo) || item.priceKobo <= 0) throw new Error(`Enter a price greater than zero for ${name}.`);
+      await ctx.db.insert("menuItems", { name, description: item.description.trim(), category: args.category, priceKobo: item.priceKobo, sortOrder, active: true });
+      sortOrder += 1;
+      count += 1;
+    }
+    return { count };
+  },
+});
+
 export const missingRecipes = query({
   args: {},
   handler: async (ctx) => {

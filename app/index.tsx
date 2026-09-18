@@ -1,8 +1,8 @@
-import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from "react";
 import { useAuthActions, useConvexAuth } from "@convex-dev/auth/react";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Doc, Id } from "@/convex/_generated/dataModel";
 import {
@@ -46,8 +46,11 @@ type PendingPayment = { orderId: Id<"orders">; number: string; totalKobo: number
 
 const DRAFT_KEY = "@nectar/pos-draft";
 const INSTALL_DISMISSED_KEY = "@nectar/install-dismissed";
+const CHAT_THREAD_KEY = "@nectar/chat-thread-id";
+const CHAT_HISTORY_KEY = "@nectar/chat-history";
 export default function Index() {
   const [tab, setTab] = useState<TabName>("Home");
+  const [chatOpen, setChatOpen] = useState(false);
   const [cart, setCart] = useState<Cart>({});
   const [orderType, setOrderType] = useState<"dine-in" | "takeaway">("dine-in");
   const [deliveryFee, setDeliveryFee] = useState("");
@@ -123,7 +126,125 @@ export default function Index() {
       )}
       <TabBar tab={tab} onChange={navigateToTab} bottomInset={insets.bottom} role={role} />
       <InstallBanner bottomOffset={insets.bottom + 92} />
+      {tab === "Home" && role === "owner" && (
+        <Pressable style={[styles.chatFab, { bottom: insets.bottom + 96 }]} onPress={() => setChatOpen(true)} hitSlop={8}>
+          <Ionicons name="sparkles" size={24} color="#FFFFFF" />
+        </Pressable>
+      )}
+      <ChatAssistant open={chatOpen} onClose={() => setChatOpen(false)} bottomInset={insets.bottom} />
     </SafeAreaView>
+  );
+}
+
+type ChatMessage = { role: "user" | "assistant"; text: string; error?: boolean };
+
+function ChatAssistant({ open, onClose, bottomInset }: { open: boolean; onClose: () => void; bottomInset: number }) {
+  const chat = useAction(api.ai.chat);
+  const [threadId, setThreadId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [input, setInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const scrollRef = useRef<ScrollView | null>(null);
+
+  useEffect(() => {
+    if (!open || loaded) return;
+    (async () => {
+      try {
+        const [rawThread, rawHistory] = await Promise.all([AsyncStorage.getItem(CHAT_THREAD_KEY), AsyncStorage.getItem(CHAT_HISTORY_KEY)]);
+        if (rawThread) setThreadId(rawThread);
+        if (rawHistory) {
+          const parsed = JSON.parse(rawHistory) as ChatMessage[];
+          if (Array.isArray(parsed)) setMessages(parsed.filter((message) => message && typeof message.text === "string"));
+        }
+      } catch {
+        // start fresh on storage errors
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, [open, loaded]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    AsyncStorage.setItem(CHAT_THREAD_KEY, threadId ?? "").catch(() => undefined);
+    AsyncStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(messages)).catch(() => undefined);
+  }, [threadId, messages, loaded]);
+
+  useEffect(() => {
+    if (open && messages.length > 0) scrollRef.current?.scrollToEnd({ animated: true });
+  }, [messages, sending, open]);
+
+  const resetConversation = () => {
+    setMessages([]);
+    setThreadId(null);
+    AsyncStorage.multiRemove([CHAT_THREAD_KEY, CHAT_HISTORY_KEY]).catch(() => undefined);
+  };
+
+  const send = async () => {
+    const prompt = input.trim();
+    if (!prompt || sending) return;
+    const next = [...messages, { role: "user" as const, text: prompt }];
+    setMessages(next);
+    setInput("");
+    setSending(true);
+    try {
+      const result = await chat(threadId ? { prompt, threadId } : { prompt });
+      setThreadId(result.threadId);
+      setMessages([...next, { role: "assistant", text: result.text }]);
+    } catch (err) {
+      setMessages([...next, { role: "assistant", text: err instanceof Error ? err.message : "Could not reach the assistant. Try again.", error: true }]);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <Modal visible={open} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView style={styles.modalRoot} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <Pressable style={styles.modalBackdrop} onPress={onClose} />
+        <View style={[styles.chatSheet, { paddingBottom: Math.max(bottomInset, 18) }]}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <View>
+              <Text style={styles.sheetTitle}>Nectar Assistant</Text>
+              <Text style={styles.sheetSubtitle}>Ask about sales, expenses, stock or shifts.</Text>
+            </View>
+            <View style={styles.chatHeaderActions}>
+              {messages.length > 0 && <Pressable style={styles.chatResetButton} onPress={resetConversation} hitSlop={8}><Ionicons name="refresh" size={18} color="#75584B" /></Pressable>}
+              <Pressable style={styles.sheetClose} onPress={onClose}><Ionicons name="close" size={21} color="#4D534D" /></Pressable>
+            </View>
+          </View>
+          {messages.length === 0 ? (
+            <View style={styles.chatEmpty}>
+              <Ionicons name="sparkles-outline" size={40} color="#C97F5C" />
+              <Text style={styles.chatEmptyTitle}>Ask me anything about your business</Text>
+              <Text style={styles.chatEmptyCopy}>Try “How was sales today?” or “Which menu items sell the most this week?”</Text>
+            </View>
+          ) : (
+            <ScrollView ref={scrollRef} style={styles.chatMessagesScroll} contentContainerStyle={styles.chatMessagesContent} showsVerticalScrollIndicator={false}>
+              {messages.map((message, index) => (
+                <View key={index} style={[styles.chatBubble, message.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant]}>
+                  <Text style={[styles.chatBubbleText, message.role === "user" ? styles.chatBubbleTextUser : styles.chatBubbleTextAssistant]}>{message.text}</Text>
+                </View>
+              ))}
+              {sending && (
+                <View style={[styles.chatBubble, styles.chatBubbleAssistant]}>
+                  <View style={styles.chatTyping}><ActivityIndicator size="small" color="#A84629" /><Text style={styles.chatBubbleTextAssistant}>Thinking…</Text></View>
+                </View>
+              )}
+            </ScrollView>
+          )}
+          <View style={styles.chatInputRow}>
+            <View style={styles.chatInputWrap}>
+              <TextInput value={input} onChangeText={setInput} placeholder="Ask about your business…" placeholderTextColor="#A0A49D" style={styles.chatInput} onSubmitEditing={send} blurOnSubmit={false} returnKeyType="send" />
+            </View>
+            <Pressable style={[styles.chatSendButton, (!input.trim() || sending) && styles.chatSendButtonDisabled]} onPress={send} disabled={!input.trim() || sending}><Ionicons name="arrow-up" size={22} color="#FFFFFF" /></Pressable>
+          </View>
+          <Text style={styles.chatDisclaimer}>Owner accounts only. AI answers may be approximate.</Text>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -1465,6 +1586,7 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
   const updatePurchaseItem = useMutation(api.money.updatePurchaseItem);
   const updateMenuItem = useMutation(api.menu.updateItem);
   const createMenuItem = useMutation(api.menu.createItem);
+  const createMenuItems = useMutation(api.menu.createItems);
   const createMenuCategory = useMutation(api.menu.createCategory);
   const renameMenuCategory = useMutation(api.menu.renameCategory);
   const upsertRecipe = useMutation(api.recipes.upsert);
@@ -1532,6 +1654,7 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
   const [editDescription, setEditDescription] = useState("");
   const [editCategory, setEditCategory] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [draftLines, setDraftLines] = useState<{ name: string; description: string; price: string }[]>([]);
   const [editActive, setEditActive] = useState(true);
   const [editSoldOut, setEditSoldOut] = useState(false);
   const [recipeIngredientId, setRecipeIngredientId] = useState<Id<"ingredients"> | null>(null);
@@ -1638,17 +1761,38 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
       setEditOpening(false);
     } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not update the opening cash."); } finally { setSaving(false); }
   };
+  const updateDraftLine = (index: number, patch: Partial<{ name: string; description: string; price: string }>) => setDraftLines((lines) => lines.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+  const addDraftLine = () => setDraftLines((lines) => [...lines, { name: "", description: "", price: "" }]);
+  const removeDraftLine = (index: number) => setDraftLines((lines) => (lines.length > 1 ? lines.filter((_, i) => i !== index) : lines));
+  const draftItemCount = draftLines.filter((line) => line.name.trim() || line.description.trim() || nairaInputToKobo(line.price) > 0).length;
+
   const beginEditMenuItem = (item: Doc<"menuItems">) => {
     setCreatingMenuItem(false); setEditingMenuItem(item); setEditName(item.name); setEditDescription(item.description ?? ""); setEditCategory(item.category); setEditPrice(String(Math.round(item.priceKobo / 100))); setEditActive(item.active); setEditSoldOut(item.soldOut === true); setRecipeIngredientId(null); setRecipeQuantity(""); setCategoryPickerOpen(false); setError(null);
   };
   const beginCreateMenuItem = () => {
-    setCreatingMenuItem(true); setEditingMenuItem(null); setEditName(""); setEditDescription(""); setEditCategory(menuCategories?.find((category) => category.active)?.name ?? ""); setEditPrice(""); setEditActive(true); setEditSoldOut(false); setRecipeIngredientId(null); setRecipeQuantity(""); setCategoryPickerOpen(false); setError(null);
+    setCreatingMenuItem(true); setEditingMenuItem(null); setDraftLines([{ name: "", description: "", price: "" }]); setEditCategory(menuCategories?.find((category) => category.active)?.name ?? ""); setCategoryPickerOpen(false); setError(null);
   };
   const saveMenuItem = async () => {
-    const priceKobo = nairaInputToKobo(editPrice);
-    if (!editName.trim() || !editCategory || priceKobo <= 0) { setError("Add a name, choose a category and enter a price greater than zero."); return; }
     setSaving(true); setError(null);
-    try { if (creatingMenuItem) await createMenuItem({ name: editName, description: editDescription, category: editCategory, priceKobo }); else if (editingMenuItem) await updateMenuItem({ menuItemId: editingMenuItem._id, name: editName, description: editDescription, category: editCategory, priceKobo, active: editActive, soldOut: editSoldOut }); setEditingMenuItem(null); setCreatingMenuItem(false); } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save menu item."); } finally { setSaving(false); }
+    try {
+      if (creatingMenuItem) {
+        if (!editCategory) { setError("Choose a category."); setSaving(false); return; }
+        const rows = draftLines.map((line) => ({ name: line.name.trim(), description: line.description, priceKobo: nairaInputToKobo(line.price) })).filter((row) => row.name || row.description.trim() || row.priceKobo > 0);
+        if (rows.length === 0) { setError("Add at least one menu item."); setSaving(false); return; }
+        for (const row of rows) {
+          if (!row.name) { setError("Give every item a name."); setSaving(false); return; }
+          if (row.priceKobo <= 0) { setError(`Enter a price greater than zero for ${row.name}.`); setSaving(false); return; }
+        }
+        await createMenuItems({ category: editCategory, items: rows.map((row) => ({ name: row.name, description: row.description, priceKobo: row.priceKobo })) });
+        setEditingMenuItem(null); setCreatingMenuItem(false);
+      } else if (editingMenuItem) {
+        const priceKobo = nairaInputToKobo(editPrice);
+        if (!editName.trim() || !editCategory || priceKobo <= 0) { setError("Add a name, choose a category and enter a price greater than zero."); return; }
+        await updateMenuItem({ menuItemId: editingMenuItem._id, name: editName, description: editDescription, category: editCategory, priceKobo, active: editActive, soldOut: editSoldOut });
+        setEditingMenuItem(null); setCreatingMenuItem(false);
+      }
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save menu item."); }
+    finally { setSaving(false); }
   };
   const saveCategory = async () => {
     if (!categoryDraftName.trim()) { setError("Enter a category name."); return; }
@@ -1798,17 +1942,33 @@ function MoreScreen({ bottomInset, role, onSignOut }: { bottomInset: number; rol
           <View style={[styles.menuManagerSheet, { paddingBottom: Math.max(bottomInset, 18) }]}>
             <View style={styles.sheetHandle} />
             {editingMenuItem || creatingMenuItem ? <>
-              <View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>{creatingMenuItem ? "Add menu item" : "Edit menu item"}</Text><Text style={styles.sheetSubtitle}>Changes appear in Sell immediately.</Text></View><Pressable style={styles.sheetClose} onPress={() => { setEditingMenuItem(null); setCreatingMenuItem(false); }}><Ionicons name="arrow-back" size={21} color="#4D534D" /></Pressable></View>
+              <View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>{creatingMenuItem ? "Add menu items" : "Edit menu item"}</Text><Text style={styles.sheetSubtitle}>Changes appear in Sell immediately.</Text></View><Pressable style={styles.sheetClose} onPress={() => { setEditingMenuItem(null); setCreatingMenuItem(false); }}><Ionicons name="arrow-back" size={21} color="#4D534D" /></Pressable></View>
               <ScrollView style={styles.menuEditorScroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <Text style={styles.receiveLabel}>Name</Text><View style={styles.reasonInputWrap}><TextInput value={editName} onChangeText={setEditName} placeholder="e.g. Grilled fish" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
-                <Text style={styles.receiveLabel}>Description</Text><View style={styles.reasonInputWrap}><TextInput value={editDescription} onChangeText={setEditDescription} placeholder="A short description" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
-                <Text style={styles.receiveLabel}>Category</Text>
-                <Pressable style={styles.categorySelect} onPress={() => setCategoryPickerOpen(!categoryPickerOpen)}><Text style={[styles.categorySelectText, !editCategory && styles.categoryPlaceholder]}>{editCategory || "Choose a category"}</Text><Ionicons name={categoryPickerOpen ? "chevron-up" : "chevron-down"} size={19} color="#756A62" /></Pressable>
-                {categoryPickerOpen && <View style={styles.categoryOptions}>{menuCategories?.filter((category) => category.active).map((category) => <Pressable key={category._id} style={styles.categoryOption} onPress={() => { setEditCategory(category.name); setCategoryPickerOpen(false); }}><Text style={styles.categorySelectText}>{category.name}</Text>{editCategory === category.name && <Ionicons name="checkmark" size={18} color="#557451" />}</Pressable>)}</View>}
-                <Text style={styles.receiveLabel}>Price</Text><View style={styles.moneyInputWrap}><Text style={styles.moneyPrefix}>₦</Text><TextInput value={editPrice} onChangeText={(value) => setEditPrice(cleanMoneyInput(value))} placeholder="0" placeholderTextColor="#A0A49D" keyboardType="number-pad" style={styles.moneyInput} /></View>
+                {creatingMenuItem && <>
+                  <Text style={styles.receiveLabel}>Category</Text>
+                  <Pressable style={styles.categorySelect} onPress={() => setCategoryPickerOpen(!categoryPickerOpen)}><Text style={[styles.categorySelectText, !editCategory && styles.categoryPlaceholder]}>{editCategory || "Choose a category"}</Text><Ionicons name={categoryPickerOpen ? "chevron-up" : "chevron-down"} size={19} color="#756A62" /></Pressable>
+                  {categoryPickerOpen && <View style={styles.categoryOptions}>{menuCategories?.filter((category) => category.active).map((category) => <Pressable key={category._id} style={styles.categoryOption} onPress={() => { setEditCategory(category.name); setCategoryPickerOpen(false); }}><Text style={styles.categorySelectText}>{category.name}</Text>{editCategory === category.name && <Ionicons name="checkmark" size={18} color="#557451" />}</Pressable>)}</View>}
+                  {draftLines.map((line, index) => (
+                    <View key={index} style={styles.bulkItemCard}>
+                      <View style={styles.bulkItemHeader}><Text style={styles.receiveLabel}>Item {index + 1}</Text>{draftLines.length > 1 && <Pressable onPress={() => removeDraftLine(index)} hitSlop={10}><Ionicons name="trash-outline" size={17} color="#A34A30" /></Pressable>}</View>
+                      <Text style={styles.receiveLabel}>Name</Text><View style={styles.reasonInputWrap}><TextInput value={line.name} onChangeText={(value) => updateDraftLine(index, { name: value })} placeholder="e.g. Grilled fish" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
+                      <Text style={styles.receiveLabel}>Description</Text><View style={styles.reasonInputWrap}><TextInput value={line.description} onChangeText={(value) => updateDraftLine(index, { description: value })} placeholder="A short description (optional)" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
+                      <Text style={styles.receiveLabel}>Price</Text><View style={styles.moneyInputWrap}><Text style={styles.moneyPrefix}>₦</Text><TextInput value={line.price} onChangeText={(value) => updateDraftLine(index, { price: cleanMoneyInput(value) })} placeholder="0" placeholderTextColor="#A0A49D" keyboardType="number-pad" style={styles.moneyInput} /></View>
+                    </View>
+                  ))}
+                  <Pressable style={styles.addAnotherButton} onPress={addDraftLine}><Ionicons name="add-circle" size={20} color="#557451" /><Text style={styles.addAnotherText}>Add another item</Text></Pressable>
+                </>}
+                {!creatingMenuItem && <>
+                  <Text style={styles.receiveLabel}>Name</Text><View style={styles.reasonInputWrap}><TextInput value={editName} onChangeText={setEditName} placeholder="e.g. Grilled fish" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
+                  <Text style={styles.receiveLabel}>Description</Text><View style={styles.reasonInputWrap}><TextInput value={editDescription} onChangeText={setEditDescription} placeholder="A short description" placeholderTextColor="#A0A49D" style={styles.reasonInput} /></View>
+                  <Text style={styles.receiveLabel}>Category</Text>
+                  <Pressable style={styles.categorySelect} onPress={() => setCategoryPickerOpen(!categoryPickerOpen)}><Text style={[styles.categorySelectText, !editCategory && styles.categoryPlaceholder]}>{editCategory || "Choose a category"}</Text><Ionicons name={categoryPickerOpen ? "chevron-up" : "chevron-down"} size={19} color="#756A62" /></Pressable>
+                  {categoryPickerOpen && <View style={styles.categoryOptions}>{menuCategories?.filter((category) => category.active).map((category) => <Pressable key={category._id} style={styles.categoryOption} onPress={() => { setEditCategory(category.name); setCategoryPickerOpen(false); }}><Text style={styles.categorySelectText}>{category.name}</Text>{editCategory === category.name && <Ionicons name="checkmark" size={18} color="#557451" />}</Pressable>)}</View>}
+                  <Text style={styles.receiveLabel}>Price</Text><View style={styles.moneyInputWrap}><Text style={styles.moneyPrefix}>₦</Text><TextInput value={editPrice} onChangeText={(value) => setEditPrice(cleanMoneyInput(value))} placeholder="0" placeholderTextColor="#A0A49D" keyboardType="number-pad" style={styles.moneyInput} /></View>
+                </>}
                 {!creatingMenuItem && <><Pressable style={styles.availabilityToggle} onPress={() => setEditActive(!editActive)}><Ionicons name={editActive ? "checkmark-circle" : "close-circle"} size={22} color={editActive ? "#557451" : "#A34A30"} /><Text style={styles.availabilityText}>{editActive ? "Available for sale" : "Hidden from sale"}</Text></Pressable>{editActive && <Pressable style={styles.availabilityToggle} onPress={() => setEditSoldOut(!editSoldOut)}><Ionicons name="alert-circle" size={22} color={editSoldOut ? "#A34A30" : "#A0A49D"} /><Text style={[styles.availabilityText, editSoldOut && { color: "#A34A30" }]}>{editSoldOut ? "Sold out" : "Sold out (temporarily unavailable)"}</Text></Pressable>}<Text style={styles.recipeTitle}>Recipe ingredients</Text>{recipeRows?.map((row) => <View key={row._id} style={styles.recipeRow}><Text style={styles.recipeName}>{row.ingredient?.name ?? "Ingredient"}</Text><Text style={styles.recipeQuantity}>{formatQuantity(row.quantity)} {row.ingredient?.unit ?? ""}</Text><Pressable onPress={() => removeRecipe({ recipeId: row._id })}><Ionicons name="trash-outline" size={18} color="#A34A30" /></Pressable></View>)}<View style={styles.recipeAddRow}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ingredientPicker}>{ingredients?.filter((ingredient) => ingredient.active !== false).map((ingredient) => <Pressable key={ingredient._id} style={[styles.ingredientChip, recipeIngredientId === ingredient._id && styles.ingredientChipActive]} onPress={() => setRecipeIngredientId(ingredient._id)}><Text style={[styles.ingredientChipText, recipeIngredientId === ingredient._id && styles.ingredientChipTextActive]}>{ingredient.name}</Text></Pressable>)}</ScrollView><View style={styles.moneyInputWrap}><TextInput value={recipeQuantity} onChangeText={(value) => setRecipeQuantity(cleanDecimalInput(value))} placeholder="Qty" placeholderTextColor="#A0A49D" keyboardType="decimal-pad" style={styles.moneyInput} /><Text style={styles.receiveUnit}>{ingredients?.find((ingredient) => ingredient._id === recipeIngredientId)?.unit}</Text></View><Pressable style={styles.addRecipeButton} onPress={saveRecipe}><Ionicons name="add" size={21} color="#FFFFFF" /></Pressable></View></>}
                 {error && <View style={styles.paymentErrorBox}><Ionicons name="alert-circle" size={18} color="#A84F37" /><Text style={styles.paymentErrorText}>{error}</Text></View>}
-                <Pressable style={[styles.sendButton, saving && styles.sendButtonDisabled]} onPress={saveMenuItem} disabled={saving}>{saving ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.sendButtonText}>{creatingMenuItem ? "Add menu item" : "Save menu item"}</Text><Ionicons name="checkmark" size={20} color="#FFFFFF" /></>}</Pressable>
+                <Pressable style={[styles.sendButton, saving && styles.sendButtonDisabled]} onPress={saveMenuItem} disabled={saving}>{saving ? <ActivityIndicator color="#FFFFFF" /> : <><Text style={styles.sendButtonText}>{creatingMenuItem ? (draftItemCount === 0 ? "Add items" : `Add ${draftItemCount} ${draftItemCount === 1 ? "item" : "items"}`) : "Save menu item"}</Text><Ionicons name="checkmark" size={20} color="#FFFFFF" /></>}</Pressable>
               </ScrollView>
             </> : <>
               <View style={styles.sheetHeader}><View><Text style={styles.sheetTitle}>Menu & recipes</Text><Text style={styles.sheetSubtitle}>Manage dishes and ingredient mappings.</Text></View><Pressable style={styles.sheetClose} onPress={() => setMenuOpen(false)}><Ionicons name="close" size={21} color="#4D534D" /></Pressable></View>
@@ -2409,6 +2569,10 @@ const styles = StyleSheet.create({
   categoryPlaceholder: { color: "#A0A49D", fontWeight: "500" },
   categoryOptions: { borderRadius: 14, borderWidth: 1, borderColor: "#E8DED6", backgroundColor: "#FFFFFF", marginTop: -8, marginBottom: 14, overflow: "hidden" },
   categoryOption: { minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 14, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#E4DDD7" },
+  bulkItemCard: { backgroundColor: "#FFFFFF", borderRadius: 16, borderWidth: 1, borderColor: "#E8DED6", padding: 14, marginBottom: 12 },
+  bulkItemHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  addAnotherButton: { minHeight: 46, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: 13, borderWidth: 1.5, borderColor: "#C4D6BE", borderStyle: "dashed", marginBottom: 14 },
+  addAnotherText: { color: "#557451", fontSize: 14, fontWeight: "700" },
   menuAddButton: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderRadius: 14, backgroundColor: "#A84629", marginBottom: 10 },
   menuManagerList: { maxHeight: 520 },
   menuManagerRow: { minHeight: 70, flexDirection: "row", alignItems: "center", gap: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: "#E4DDD7" },
@@ -2655,4 +2819,26 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 70, height: 70, borderRadius: 24, backgroundColor: "#E4ECE1", alignItems: "center", justifyContent: "center" },
   emptyTitle: { color: "#222722", fontSize: 28, fontWeight: "700", marginTop: 18 },
   emptyCopy: { color: "#858880", fontSize: 14, lineHeight: 20, textAlign: "center", marginTop: 8 },
+  chatFab: { position: "absolute", right: 16, width: 56, height: 56, borderRadius: 28, backgroundColor: "#A84629", alignItems: "center", justifyContent: "center", shadowColor: "#5C2314", shadowOpacity: 0.32, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 9 },
+  chatSheet: { height: "94%", backgroundColor: "#FFF9F2", borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 18, paddingTop: 10 },
+  chatHeaderActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  chatResetButton: { width: 38, height: 38, borderRadius: 13, backgroundColor: "#EDEDE7", alignItems: "center", justifyContent: "center" },
+  chatEmpty: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 28, paddingBottom: 40, gap: 10 },
+  chatEmptyTitle: { color: "#3C312B", fontSize: 17, fontWeight: "800", textAlign: "center" },
+  chatEmptyCopy: { color: "#8A817A", fontSize: 13, lineHeight: 19, textAlign: "center" },
+  chatMessagesScroll: { flex: 1 },
+  chatMessagesContent: { gap: 9, paddingBottom: 12 },
+  chatBubble: { maxWidth: "86%", borderRadius: 19, paddingHorizontal: 15, paddingVertical: 11 },
+  chatBubbleUser: { alignSelf: "flex-end", backgroundColor: "#A84629", borderBottomRightRadius: 6 },
+  chatBubbleAssistant: { alignSelf: "flex-start", backgroundColor: "#FFFFFF", borderWidth: 1, borderColor: "#E9E0D8", borderBottomLeftRadius: 6 },
+  chatBubbleText: { fontSize: 15, lineHeight: 21 },
+  chatBubbleTextUser: { color: "#FFFFFF", fontWeight: "600" },
+  chatBubbleTextAssistant: { color: "#3A2F28" },
+  chatTyping: { flexDirection: "row", alignItems: "center", gap: 8 },
+  chatInputRow: { flexDirection: "row", alignItems: "flex-end", gap: 9, marginTop: 10 },
+  chatInputWrap: { flex: 1, minHeight: 52, justifyContent: "center", borderRadius: 17, backgroundColor: "#FFFFFF", borderWidth: 1.5, borderColor: "#D8CDC4", paddingHorizontal: 15 },
+  chatInput: { color: "#342820", fontSize: 15, paddingVertical: 10 },
+  chatSendButton: { width: 52, height: 52, borderRadius: 17, backgroundColor: "#557451", alignItems: "center", justifyContent: "center" },
+  chatSendButtonDisabled: { opacity: 0.45 },
+  chatDisclaimer: { color: "#9AA09A", fontSize: 11, lineHeight: 15, textAlign: "center", marginTop: 10 },
 });

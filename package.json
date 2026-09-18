@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@auth/core": "^0.41.1",
+    "@convex-dev/agent": "^0.7.3",
+    "@convex-dev/ai-sdk-provider": "^0.1.0",
     "@convex-dev/auth": "^0.0.95",
     "@expo/metro-runtime": "~57.0.15",
     "@expo/vector-icons": "^15.0.2",
