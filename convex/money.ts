@@ -24,6 +24,56 @@ export const recentExpenses = query({
   },
 });
 
+export const listExpenseTypes = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, "owner", "manager");
+    const rows = await ctx.db.query("expenseTypes").withIndex("by_active", (q) => q.eq("active", true)).take(100);
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
+export const addExpenseType = mutation({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, "owner", "manager");
+    const name = args.name.trim();
+    if (!name) throw new Error("Expense type needs a name");
+    const existing = await ctx.db.query("expenseTypes").withIndex("by_name", (q) => q.eq("name", name)).unique();
+    if (existing) throw new Error("That expense type already exists");
+    const id = await ctx.db.insert("expenseTypes", { name, active: true });
+    return { id };
+  },
+});
+
+export const removeExpenseType = mutation({
+  args: { id: v.id("expenseTypes") },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, "owner", "manager");
+    const type = await ctx.db.get(args.id);
+    if (!type) throw new Error("Expense type not found");
+    await ctx.db.delete(args.id);
+    return { id: args.id };
+  },
+});
+
+export const expensesByType = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, "owner", "manager");
+    const expenses = await ctx.db.query("expenses").withIndex("by_createdAt", (q) => q.gte("createdAt", args.from).lt("createdAt", args.to)).take(2000);
+    const groups = new Map<string, { type: string; totalKobo: number; count: number }>();
+    for (const expense of expenses) {
+      const name = expense.type?.trim() || "Other";
+      const group = groups.get(name) ?? { type: name, totalKobo: 0, count: 0 };
+      group.totalKobo += expense.amountKobo;
+      group.count += 1;
+      groups.set(name, group);
+    }
+    return Array.from(groups.values()).sort((a, b) => b.totalKobo - a.totalKobo);
+  },
+});
+
 export const recentPurchases = query({
   args: {},
   handler: async (ctx) => {
@@ -99,6 +149,7 @@ export const summary = query({
 export const addExpense = mutation({
   args: {
     description: v.string(),
+    type: v.optional(v.string()),
     amountKobo: v.number(),
     paymentMethod: v.union(v.literal("cash"), v.literal("card"), v.literal("transfer")),
   },
@@ -106,9 +157,14 @@ export const addExpense = mutation({
     await requireRole(ctx, "owner", "manager");
     const description = args.description.trim();
     if (!description) throw new Error("Add a description for this expense");
+    const type = args.type?.trim();
+    if (type) {
+      const typeRow = await ctx.db.query("expenseTypes").withIndex("by_name", (q) => q.eq("name", type)).unique();
+      if (!typeRow || typeRow.active !== true) throw new Error("That expense type doesn't exist. Add it under Expense types first.");
+    }
     if (!Number.isFinite(args.amountKobo) || args.amountKobo <= 0) throw new Error("Expense amount must be greater than zero");
     const openShift = await ctx.db.query("shifts").withIndex("by_status", (q) => q.eq("status", "open")).unique();
-    const expenseId = await ctx.db.insert("expenses", { description, amountKobo: args.amountKobo, paymentMethod: args.paymentMethod, shiftId: openShift?._id, createdAt: Date.now() });
+    const expenseId = await ctx.db.insert("expenses", { description, type: type || undefined, amountKobo: args.amountKobo, paymentMethod: args.paymentMethod, shiftId: openShift?._id, createdAt: Date.now() });
     return { expenseId };
   },
 });

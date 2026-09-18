@@ -24,6 +24,55 @@ describe("expenses", () => {
   });
 });
 
+describe("expense types", () => {
+  test("creates, lists, and records an expense tagged with a type", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    await ownerT.mutation(api.money.addExpenseType, { name: "Transport" });
+    const types = await ownerT.query(api.money.listExpenseTypes, {});
+    expect(types.map((type) => type.name)).toEqual(["Transport"]);
+    const { expenseId } = await ownerT.mutation(api.money.addExpense, { description: "Bus fare", type: "Transport", amountKobo: 1500, paymentMethod: "cash" });
+    const expense = await t.run(async (ctx) => ctx.db.get(expenseId));
+    expect(expense?.type).toBe("Transport");
+  });
+
+  test("rejects duplicate type names and unknown types", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    await ownerT.mutation(api.money.addExpenseType, { name: "Fuel" });
+    await expect(ownerT.mutation(api.money.addExpenseType, { name: "Fuel" })).rejects.toThrow("already exists");
+    await expect(ownerT.mutation(api.money.addExpense, { description: "Tea", type: "Snacks", amountKobo: 500, paymentMethod: "cash" })).rejects.toThrow("expense type");
+  });
+
+  test("groups expenses by type over a range", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    await ownerT.mutation(api.money.addExpenseType, { name: "Transport" });
+    await ownerT.mutation(api.money.addExpenseType, { name: "Utilities" });
+    await ownerT.mutation(api.money.addExpense, { description: "Fuel", type: "Transport", amountKobo: 4000, paymentMethod: "cash" });
+    await ownerT.mutation(api.money.addExpense, { description: "Keke", type: "Transport", amountKobo: 1000, paymentMethod: "cash" });
+    await ownerT.mutation(api.money.addExpense, { description: "Power", type: "Utilities", amountKobo: 2000, paymentMethod: "card" });
+    await ownerT.mutation(api.money.addExpense, { description: "Untagged", amountKobo: 700, paymentMethod: "cash" });
+    const rows = await ownerT.query(api.money.expensesByType, { from: 0, to: Date.now() + 1000 });
+    expect(rows).toEqual([
+      { type: "Transport", totalKobo: 5000, count: 2 },
+      { type: "Utilities", totalKobo: 2000, count: 1 },
+      { type: "Other", totalKobo: 700, count: 1 },
+    ]);
+  });
+
+  test("removes a type without touching expenses already recorded with it", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    const { id } = await ownerT.mutation(api.money.addExpenseType, { name: "Rent" });
+    const { expenseId } = await ownerT.mutation(api.money.addExpense, { description: "Shop rent", type: "Rent", amountKobo: 500000, paymentMethod: "transfer" });
+    await ownerT.mutation(api.money.removeExpenseType, { id });
+    expect(await ownerT.query(api.money.listExpenseTypes, {})).toEqual([]);
+    const expense = await t.run(async (ctx) => ctx.db.get(expenseId));
+    expect(expense?.type).toBe("Rent");
+  });
+});
+
 describe("purchases", () => {
   test("increases stock, links the purchase lines, and updates the unit cost", async () => {
     const t = newT();

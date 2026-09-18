@@ -124,11 +124,16 @@ export default defineSchema({
   }).index("by_ingredientId_and_createdAt", ["ingredientId", "createdAt"]).index("by_createdAt", ["createdAt"]).index("by_orderId", ["orderId"]),
   expenses: defineTable({
     description: v.string(),
+    type: v.optional(v.string()),
     amountKobo: v.number(),
     paymentMethod: v.optional(v.union(v.literal("cash"), v.literal("card"), v.literal("transfer"))),
     shiftId: v.optional(v.id("shifts")),
     createdAt: v.number(),
   }).index("by_createdAt", ["createdAt"]).index("by_shiftId", ["shiftId"]),
+  expenseTypes: defineTable({
+    name: v.string(),
+    active: v.boolean(),
+  }).index("by_name", ["name"]).index("by_active", ["active"]),
   purchases: defineTable({
     supplier: v.optional(v.string()),
     totalKobo: v.number(),
