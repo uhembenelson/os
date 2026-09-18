@@ -144,6 +144,41 @@ describe("shifts.close", () => {
   });
 });
 
+describe("shifts.updateOpeningCash", () => {
+  test("re-calculates expected cash from the new opening amount", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    await ownerT.mutation(api.shifts.open, { openingCashKobo: 100000 });
+    const { orderId } = await ownerT.mutation(api.orders.create, {
+      clientRequestId: `edit-open-${Math.random()}`,
+      orderType: "takeaway",
+      deliveryFeeKobo: 0,
+      packagingFeeKobo: 0,
+      items: [{ key: "nokey", name: "Plain", quantity: 1, unitPriceKobo: 50000 }],
+    });
+    await ownerT.mutation(api.orders.markPaid, { orderId, paymentMethod: "cash", amountTenderedKobo: 50000 });
+
+    const updated = await ownerT.mutation(api.shifts.updateOpeningCash, { openingCashKobo: 150000 });
+    const current = await ownerT.query(api.shifts.current, {});
+    expect(updated.expectedCashKobo).toBe(200000);
+    expect(current?.openingCashKobo).toBe(150000);
+    expect(current?.expectedCashKobo).toBe(200000);
+  });
+
+  test("only managers and owners can edit and only while a shift is open", async () => {
+    const t = newT();
+    const ownerT = await asOwner(t);
+    const cashierT = await createStaffAsOwner(ownerT, t, "Bola", "+2348177777777", "222222", "cashier");
+    const { shiftId } = await ownerT.mutation(api.shifts.open, { openingCashKobo: 0 });
+
+    await expect(cashierT.mutation(api.shifts.updateOpeningCash, { openingCashKobo: 50000 })).rejects.toThrow("do not have permission");
+    await expect(ownerT.mutation(api.shifts.updateOpeningCash, { openingCashKobo: -5 })).rejects.toThrow("cannot be negative");
+
+    await ownerT.mutation(api.shifts.close, { shiftId, countedCashKobo: 0 });
+    await expect(ownerT.mutation(api.shifts.updateOpeningCash, { openingCashKobo: 0 })).rejects.toThrow("No shift is open");
+  });
+});
+
 async function paidOrder(ownerT: Owned, method: "cash" | "card" | "transfer", priceKobo: number) {
   const order = await ownerT.mutation(api.orders.create, {
     clientRequestId: `po-${method}-${Math.random()}`,

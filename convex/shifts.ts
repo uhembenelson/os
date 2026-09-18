@@ -67,6 +67,20 @@ export const open = mutation({
   },
 });
 
+export const updateOpeningCash = mutation({
+  args: { openingCashKobo: v.number() },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, "owner", "manager");
+    if (!Number.isFinite(args.openingCashKobo) || args.openingCashKobo < 0) throw new Error("Opening cash cannot be negative");
+    const shift = await ctx.db.query("shifts").withIndex("by_status", (q) => q.eq("status", "open")).unique();
+    if (!shift) throw new Error("No shift is open");
+    const breakdown = await computeExpectedCash(ctx, shift);
+    const expectedCashKobo = breakdown.expectedCashKobo - shift.openingCashKobo + args.openingCashKobo;
+    await ctx.db.patch(shift._id, { openingCashKobo: args.openingCashKobo, expectedCashKobo });
+    return { openingCashKobo: args.openingCashKobo, expectedCashKobo };
+  },
+});
+
 export const close = mutation({
   args: { shiftId: v.id("shifts"), countedCashKobo: v.number(), note: v.optional(v.string()) },
   handler: async (ctx, args) => {
